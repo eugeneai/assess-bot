@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -6,6 +7,13 @@ from aiogram import Bot
 from aiogram.types import Document
 
 from core.config import settings
+
+
+def slugify(text: str, max_len: int = 50) -> str:
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\sа-яёa-z-]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'[-\s]+', '-', text)
+    return text.strip('-')[:max_len].rstrip('-')
 
 
 async def save_uploaded_file(bot: Bot, document: Document) -> str:

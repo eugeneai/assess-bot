@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -10,6 +11,7 @@ from core.config import settings
 from core.database import get_session
 from core.models import Submission, Lab, Course, Student
 from services.agent import AssessmentAgent
+from services.review import generate_review, organize_files, slugify, write_review
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +144,7 @@ async def handle_grade_input(message: Message):
         submission.grade = grade
         submission.feedback = feedback
         submission.graded_by = "teacher"
-        submission.graded_at = __import__("datetime").datetime.utcnow()
+        submission.graded_at = datetime.utcnow()
         submission.awaiting_grade = False
         await session.commit()
 
@@ -150,11 +152,41 @@ async def handle_grade_input(message: Message):
         student = await session.get(Student, submission.student_id)
         course = await session.get(Course, lab.course_id) if lab else None
 
+    student_name = student.full_name if student else "?"
+    course_title = course.title if course else "?"
+    lab_title = lab.title if lab else "?"
+
     await message.answer(
         f"✅ <b>Оценка сохранена!</b>\n"
-        f"#{submission.id} {student.full_name if student else ''}\n"
+        f"#{submission.id} {student_name}\n"
         f"📊 <b>{grade}/100</b>\n"
         f"{'💬 ' + feedback if feedback else ''}"
     )
 
     await agent.train(submission.id, grade, feedback)
+
+    try:
+        course_slug = slugify(course_title)
+        lab_slug = slugify(lab_title)
+        student_slug = slugify(student_name)
+        files_meta = organize_files(submission.files_meta, course_slug, lab_slug, student_slug)
+
+        dest_dir = f"{settings.storage_path}/{course_slug}/{lab_slug}/{student_slug}"
+        content = generate_review(
+            student_name=student_name,
+            course_title=course_title,
+            lab_title=lab_title,
+            grade=grade,
+            feedback=feedback,
+            files_meta=files_meta,
+            graded_at=datetime.utcnow(),
+            extracted_text=submission.extracted_text or "",
+        )
+        write_review(dest_dir, content)
+
+        async with await get_session() as session:
+            sub = await session.get(Submission, submission.id)
+            sub.files_meta = files_meta
+            await session.commit()
+    except Exception as e:
+        logger.warning("Failed to write REVIEW.md: %s", e)
