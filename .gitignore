@@ -27,6 +27,8 @@ virtualenv/
 
 # Project
 files/
+output/
+context/
 *.db
 *.sqlite
 *.sqlite3

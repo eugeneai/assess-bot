@@ -1,0 +1,41 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "chat-review",
+  "model": "deepseek/deepseek-chat",
+
+  "mcp": {
+    "assess-sync": {
+      "type": "local",
+      "command": ["python", "tools/assess_sync.py"],
+      "enabled": true
+    }
+  },
+
+  "agent": {
+    "chat-review": {
+      "description": "Чат с контекстом оценок. Спрашивайте про работы, ставьте оценки.",
+      "mode": "primary",
+      "model": "deepseek/deepseek-chat",
+      "permission": {
+        "edit": "deny",
+        "bash": "ask",
+        "read": "allow"
+      }
+    }
+  },
+
+  "command": {
+    "pull": {
+      "description": "Скачать контекст с сервера (БД + промпты)",
+      "prompt": "Выполни pull_context через assess-sync MCP"
+    },
+    "push": {
+      "description": "Отправить оценки на сервер",
+      "prompt": "Выполни push_grades через assess-sync MCP"
+    },
+    "status": {
+      "description": "Статус проверки работ",
+      "prompt": "Выполни status через assess-sync MCP"
+    }
+  }
+}
