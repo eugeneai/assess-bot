@@ -3,6 +3,7 @@ import re
 from typing import Any
 
 from services.llm import call_deepseek
+from services.parser import extract_title_info
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ class ContextDetector:
             "lab": None,
             "confidence": 0.0,
             "needs_clarification": True,
+            "practice": None,
+            "group": None,
             "layers": {},
         }
 
@@ -45,7 +48,7 @@ class ContextDetector:
         files_meta: list,
     ):
         hits = 0
-        total = 3
+        total = 5
 
         if forward_chat_name:
             match = re.search(r'[«"](.+?)[»"]', forward_chat_name)
@@ -54,6 +57,16 @@ class ContextDetector:
                 hits += 1
 
         combined = f"{message_text}\n{extracted_text}"
+
+        title_info = extract_title_info(extracted_text)
+        if title_info.get("practice"):
+            ctx["practice"] = title_info["practice"]
+            hits += 1
+        if title_info.get("course"):
+            ctx["course"] = ctx.get("course") or title_info["course"]
+            hits += 1
+        if title_info.get("group"):
+            ctx["group"] = title_info["group"]
 
         lab_patterns = [
             r'Л[Рр]\s*(\d+)',
@@ -67,6 +80,10 @@ class ContextDetector:
                 ctx["lab"] = f"ЛР{match.group(1)}"
                 hits += 1
                 break
+
+        if not ctx.get("lab") and title_info.get("lab_numbers"):
+            ctx["lab"] = f"ЛР{title_info['lab_numbers'][0]}"
+            hits += 1
 
         course_patterns = [
             r'(?:по\s+)?курс[уеа]?\s*[«"](.+?)[»"]',
@@ -101,22 +118,18 @@ class ContextDetector:
                 f"Текст сообщения: {message_text[:500] or 'нет'}\n"
                 f"Текст документа: {extracted_text[:1000] or 'нет'}\n\n"
                 "Ответь строго в формате JSON:\n"
-                '{"student_name": "ФИО студента или null", "course": "название курса или null", "lab": "название лабораторной или null", "confidence": 0.0-1.0}\n\n'
+                '{"student_name": "ФИО студента или null", "course": "название курса или null", "lab": "название лабораторной или null", "practice": "название практики или null", "group": "группа или null", "confidence": 0.0-1.0}\n\n'
                 "Если данных недостаточно — укажи null."
             )
 
             result = await call_deepseek(prompt, expect_json=True)
 
             if result:
-                if result.get("student_name"):
-                    ctx["student_name"] = result["student_name"]
-                if result.get("course"):
-                    ctx["course"] = result["course"]
-                if result.get("lab"):
-                    ctx["lab"] = result["lab"]
+                for key in ("student_name", "course", "lab", "practice", "group"):
+                    if result.get(key):
+                        ctx[key] = result[key]
                 if "confidence" in result:
                     ctx["confidence"] = max(ctx.get("confidence", 0), result["confidence"])
-
                 ctx["layers"]["llm"] = result
         except Exception as e:
             logger.warning("LLM context analysis failed: %s", e)
