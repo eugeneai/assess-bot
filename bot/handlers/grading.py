@@ -58,6 +58,10 @@ async def _render_submission(sub: Submission, index: int, total: int) -> tuple[s
         if suggested.get("reasoning"):
             text += f"\n💡 <i>{suggested['reasoning'][:200]}</i>"
 
+    if sub.review:
+        preview = sub.review[:300].replace("\n", " ")
+        text += f"\n📄 <b>Review:</b> {preview}..."
+
     kb = InlineKeyboardBuilder()
     if index > 0:
         kb.button(text="◀️", callback_data=f"review_nav_{index-1}")
@@ -65,8 +69,10 @@ async def _render_submission(sub: Submission, index: int, total: int) -> tuple[s
         kb.button(text="▶️", callback_data=f"review_nav_{index+1}")
     if sub.grade is None:
         kb.button(text="✏️ Оценить", callback_data=f"grade_{sub.id}")
+    if sub.review:
+        kb.button(text="📄 Review", callback_data=f"review_show_{sub.id}")
     kb.button(text="📎 Файлы", callback_data=f"files_{sub.id}")
-    kb.adjust(3 if (index > 0 and index < total - 1) else 2)
+    kb.adjust(4 if (index > 0 and index < total - 1) else 3)
 
     return text, kb
 
@@ -159,6 +165,30 @@ async def files_callback(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("review_show_"))
+async def review_show_callback(callback: CallbackQuery):
+    sub_id = int(callback.data.split("_")[2])
+    async with await get_session() as session:
+        sub = await session.get(Submission, sub_id)
+        student = await session.get(Student, sub.student_id) if sub and sub.student_id else None
+
+    if not sub or not sub.review:
+        await callback.answer("Review не найден", show_alert=True)
+        return
+
+    max_len = 3800
+    content = sub.review[:max_len]
+    if len(sub.review) > max_len:
+        content += "\n\n*...текст сокращён для Telegram*"
+
+    await callback.message.answer(
+        f"📄 <b>Рецензия на работу #{sub_id}</b>"
+        f"{' — ' + student.full_name if student else ''}\n\n"
+        f"<pre>{content}</pre>"
+    )
+    await callback.answer()
+
+
 @router.message(F.chat.id == settings.group_id, F.text)
 async def handle_grade_input(message: Message):
     async with await get_session() as session:
@@ -234,6 +264,7 @@ async def handle_grade_input(message: Message):
         async with await get_session() as session:
             sub = await session.get(Submission, submission.id)
             sub.files_meta = files_meta
+            sub.review = content
             await session.commit()
     except Exception as e:
         logger.warning("Failed to write REVIEW.md: %s", e)

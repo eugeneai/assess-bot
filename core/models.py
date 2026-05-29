@@ -66,6 +66,7 @@ class Submission(Base):
 
     grade = Column(Integer, nullable=True)
     feedback = Column(Text, default="")
+    review = Column(Text, default="")
     graded_by = Column(String(255), default="")
     forwarded_at = Column(DateTime, default=datetime.utcnow)
     graded_at = Column(DateTime, nullable=True)

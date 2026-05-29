@@ -24,3 +24,14 @@ async def get_session() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_v1_review)
+
+
+def _migrate_v1_review(conn):
+    from sqlalchemy import inspect, text
+    inspector = inspect(conn)
+    columns = [c["name"] for c in inspector.get_columns("submissions")]
+    if "review" not in columns:
+        conn.execute(text("ALTER TABLE submissions ADD COLUMN review TEXT DEFAULT ''"))
+        import logging
+        logging.getLogger(__name__).info("Added 'review' column to submissions table")

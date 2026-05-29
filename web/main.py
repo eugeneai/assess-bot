@@ -95,6 +95,7 @@ async def set_grade(
             async with await get_session() as session:
                 s = await session.get(Submission, submission_id)
                 s.files_meta = files_meta
+                s.review = content
                 await session.commit()
         except Exception as e:
             pass
