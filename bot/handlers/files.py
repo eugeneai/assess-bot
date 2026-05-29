@@ -63,8 +63,18 @@ async def handle_forwarded(message: Message):
     await message.answer("⏳ Анализирую полученную работу...")
 
     forward_chat_name = None
-    if message.forward_origin.chat:
-        forward_chat_name = message.forward_origin.chat.title
+    forward_user_name = None
+    fo = message.forward_origin
+    if hasattr(fo, 'chat') and fo.chat:
+        forward_chat_name = fo.chat.title
+        forward_user_name = fo.chat.title
+    if hasattr(fo, 'sender_chat') and fo.sender_chat:
+        forward_chat_name = fo.sender_chat.title
+        forward_user_name = fo.sender_chat.title
+    if hasattr(fo, 'sender_user') and fo.sender_user:
+        forward_user_name = fo.sender_user.first_name or fo.sender_user.username
+    if hasattr(fo, 'sender_user_name') and fo.sender_user_name:
+        forward_user_name = fo.sender_user_name
 
     raw_text = message.text or message.caption or ""
     files_meta = []
