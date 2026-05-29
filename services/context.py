@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Any
 
+from services.cost_tracker import record as record_cost
 from services.llm import call_deepseek
 from services.parser import extract_title_info
 
@@ -122,7 +123,9 @@ class ContextDetector:
                 "Если данных недостаточно — укажи null."
             )
 
-            result = await call_deepseek(prompt, expect_json=True)
+            result, usage = await call_deepseek(prompt, expect_json=True, max_tokens=500)
+            if usage:
+                record_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
 
             if result:
                 for key in ("student_name", "course", "lab", "practice", "group"):

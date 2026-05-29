@@ -3,10 +3,13 @@ from pathlib import Path
 from typing import Any
 
 from core.config import settings
+from services.cost_tracker import record as record_cost
 from services.llm import call_deepseek
 from services.review import load_prompt, global_prompt_path, course_prompt_path, save_prompt
 
 logger = logging.getLogger(__name__)
+
+MAX_CHARS = 128_000
 
 
 class AssessmentAgent:
@@ -62,16 +65,21 @@ class AssessmentAgent:
                 prompt_parts.append(f"- Оценка: {ex['grade']}/100, Комментарий: {ex.get('feedback', '')}")
             prompt_parts.append("")
 
-        prompt_parts.append(f"Текст работы:\n{extracted_text[:2000]}\n")
+        text_sample = extracted_text[:MAX_CHARS]
+        if len(extracted_text) > MAX_CHARS:
+            text_sample += "\n\n... (текст сокращён до 128K символов)"
+        prompt_parts.append(f"Текст работы:\n{text_sample}\n")
         prompt_parts.append(
             "Ответь строго в формате JSON:\n"
-            '{"grade": <число 0-100>, "reasoning": "<краткое обоснование>"}'
+            '{"grade": <число 0-100>, "reasoning": "<развёрнутое обоснование с пояснением по каждому критерию>"}'
         )
 
         prompt = "\n".join(prompt_parts)
 
         try:
-            result = await call_deepseek(prompt, expect_json=True)
+            result, usage = await call_deepseek(prompt, expect_json=True, max_tokens=2000)
+            if usage:
+                record_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
             if result and "grade" in result:
                 grade = int(result["grade"])
                 grade = max(0, min(100, grade))

@@ -11,6 +11,7 @@ from core.config import settings
 from core.database import get_session
 from core.models import Submission, Lab, Course, Student
 from services.agent import AssessmentAgent
+from services.cost_tracker import stats as cost_stats
 from services.review import (
     generate_review, global_prompt_path, course_prompt_path,
     load_prompt, organize_files, save_prompt, slugify, write_review,
@@ -299,3 +300,23 @@ async def cmd_get_course_prompt(message: Message):
         await message.answer(f"📚 <b>{course_title}</b>\n<code>{cp[:1000]}</code>")
     else:
         await message.answer(f"Промпт для курса «{course_title}» не задан.")
+
+
+@router.message(F.chat.id == settings.group_id, Command("stats"))
+async def cmd_stats(message: Message):
+    s = cost_stats()
+    t = s["total"]
+
+    lines = [
+        "📊 <b>Статистика использования DeepSeek</b>\n",
+        f"<b>Всего:</b>",
+        f"  Prompt токенов: {t['prompt']:,}",
+        f"  Completion токенов: {t['completion']:,}",
+        f"  <b>Затраты: ${t['cost']:.4f}</b>\n",
+        "<b>По дням:</b>",
+    ]
+
+    for day, d in sorted(s["days"].items(), reverse=True)[:7]:
+        lines.append(f"  {day}: {d['prompt']+d['completion']} токенов (${d['cost']:.4f})")
+
+    await message.answer("\n".join(lines))
