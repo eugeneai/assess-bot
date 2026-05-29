@@ -22,50 +22,92 @@ router = Router()
 agent = AssessmentAgent()
 
 
+REVIEW_PAGE_SIZE = 30
+
+
+async def _render_submission(sub: Submission, index: int, total: int) -> tuple[str, InlineKeyboardBuilder]:
+    async with await get_session() as session:
+        lab = await session.get(Lab, sub.lab_id) if sub.lab_id else None
+        student = await session.get(Student, sub.student_id) if sub.student_id else None
+        course = await session.get(Course, lab.course_id) if lab and lab.course_id else None
+
+    course_title = course.title if course else "?"
+    lab_title = lab.title if lab else "?"
+    student_name = student.full_name if student else "?"
+    course_slug = slugify(course_title) if course else None
+
+    suggested = await agent.suggest(sub.extracted_text, course_slug=course_slug)
+
+    grade_str = f"📊 <b>{sub.grade}/100</b>" if sub.grade is not None else "⏳ <i>Ожидает</i>"
+    graded_at = sub.graded_at.strftime("%d.%m.%Y %H:%M") if sub.graded_at else ""
+
+    text = (
+        f"📋 <b>Работа #{sub.id}</b>  ({index+1}/{total})\n"
+        f"👤 {student_name}\n"
+        f"📚 {course_title} → {lab_title}\n"
+        f"📅 {sub.forwarded_at.strftime('%d.%m.%Y %H:%M') if sub.forwarded_at else '?'}\n"
+        f"{grade_str}"
+    )
+    if sub.grade is not None and sub.feedback:
+        text += f"\n💬 {sub.feedback[:100]}"
+    if sub.grade is not None and graded_at:
+        text += f"\n🕐 {graded_at}"
+    if suggested and sub.grade is None:
+        text += f"\n🤖 <b>Предполагаемая оценка:</b> {suggested['grade']}/100"
+        if suggested.get("reasoning"):
+            text += f"\n💡 <i>{suggested['reasoning'][:200]}</i>"
+
+    kb = InlineKeyboardBuilder()
+    if index > 0:
+        kb.button(text="◀️", callback_data=f"review_nav_{index-1}")
+    if index < total - 1:
+        kb.button(text="▶️", callback_data=f"review_nav_{index+1}")
+    if sub.grade is None:
+        kb.button(text="✏️ Оценить", callback_data=f"grade_{sub.id}")
+    kb.button(text="📎 Файлы", callback_data=f"files_{sub.id}")
+    kb.adjust(3 if (index > 0 and index < total - 1) else 2)
+
+    return text, kb
+
+
 @router.message(F.chat.id == settings.group_id, Command("review"))
 async def cmd_review(message: Message):
     async with await get_session() as session:
         result = await session.execute(
             select(Submission)
-            .where(Submission.grade.is_(None), Submission.student_id > 0)
+            .where(Submission.student_id > 0)
             .order_by(Submission.forwarded_at.desc())
+            .limit(REVIEW_PAGE_SIZE)
         )
         submissions = result.scalars().all()
 
     if not submissions:
-        await message.answer("✅ Все работы проверены!")
+        await message.answer("📭 Нет работ.")
         return
 
-    for sub in submissions:
-        async with await get_session() as session:
-            lab = await session.get(Lab, sub.lab_id)
-            student = await session.get(Student, sub.student_id)
-            course = await session.get(Course, lab.course_id) if lab else None
+    text, kb = await _render_submission(submissions[0], 0, len(submissions))
+    await message.answer(text, reply_markup=kb.as_markup())
 
-        course_title = course.title if course else "?"
-        lab_title = lab.title if lab else "?"
-        student_name = student.full_name if student else "?"
-        course_slug = slugify(course_title) if course else None
 
-        suggested = await agent.suggest(sub.extracted_text, course_slug=course_slug)
-
-        kb = InlineKeyboardBuilder()
-        kb.button(text="✏️ Поставить оценку", callback_data=f"grade_{sub.id}")
-        kb.button(text="📎 Файлы", callback_data=f"files_{sub.id}")
-        kb.adjust(1)
-
-        text = (
-            f"📋 <b>Работа #{sub.id}</b>\n"
-            f"👤 {student_name}\n"
-            f"📚 {course_title} → {lab_title}\n"
-            f"📅 {sub.forwarded_at.strftime('%d.%m.%Y %H:%M') if sub.forwarded_at else '?'}\n"
+@router.callback_query(F.data.startswith("review_nav_"))
+async def review_nav_callback(callback: CallbackQuery):
+    index = int(callback.data.split("_")[2])
+    async with await get_session() as session:
+        result = await session.execute(
+            select(Submission)
+            .where(Submission.student_id > 0)
+            .order_by(Submission.forwarded_at.desc())
+            .limit(REVIEW_PAGE_SIZE)
         )
-        if suggested:
-            text += f"\n🤖 <b>Предполагаемая оценка:</b> {suggested['grade']}/100"
-            if suggested.get("reasoning"):
-                text += f"\n💡 <i>{suggested['reasoning'][:200]}</i>"
+        submissions = result.scalars().all()
 
-        await message.answer(text, reply_markup=kb.as_markup())
+    if index < 0 or index >= len(submissions):
+        await callback.answer("Нет работ")
+        return
+
+    text, kb = await _render_submission(submissions[index], index, len(submissions))
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("grade_"))
