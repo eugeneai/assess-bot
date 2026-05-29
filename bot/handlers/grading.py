@@ -11,7 +11,9 @@ from core.config import settings
 from core.database import get_session
 from core.models import Submission, Lab, Course, Student
 from services.agent import AssessmentAgent
+from services.cost_tracker import record as record_cost
 from services.cost_tracker import stats as cost_stats
+from services.llm import call_deepseek
 from services.review import (
     generate_review, global_prompt_path, course_prompt_path,
     load_prompt, organize_files, save_prompt, slugify, write_review,
@@ -351,3 +353,68 @@ async def cmd_stats(message: Message):
         lines.append(f"  {day}: {d['prompt']+d['completion']} токенов (${d['cost']:.4f})")
 
     await message.answer("\n".join(lines))
+
+
+@router.message(F.chat.id == settings.group_id, Command("ask"))
+async def cmd_ask(message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Формат: <code>/ask ваш вопрос о работах</code>")
+        return
+
+    question = parts[1].strip()
+    status_msg = await message.answer("⏳ Анализирую последние работы...")
+
+    async with await get_session() as session:
+        result = await session.execute(
+            select(Submission)
+            .where(Submission.student_id > 0, Submission.grade.isnot(None))
+            .order_by(Submission.graded_at.desc().nullslast())
+            .limit(30)
+        )
+        subs = result.scalars().all()
+
+        rows = []
+        for sub in subs:
+            lab = await session.get(Lab, sub.lab_id) if sub.lab_id else None
+            student = await session.get(Student, sub.student_id) if sub.student_id else None
+            course = await session.get(Course, lab.course_id) if lab and lab.course_id else None
+            rows.append((sub, student, course, lab))
+
+    if not rows:
+        await status_msg.edit_text("📭 Нет проверенных работ для анализа.")
+        return
+
+    context_lines = [f"# Контекст: последние {len(rows)} проверенных работ\n"]
+    for i, (sub, student, course, lab) in enumerate(rows, 1):
+        context_lines.append(f"## {i}. Работа #{sub.id}")
+        context_lines.append(f"- Студент: {student.full_name if student else '?'}")
+        context_lines.append(f"- Курс: {course.title if course else '?'}")
+        context_lines.append(f"- Лаба: {lab.title if lab else '?'}")
+        context_lines.append(f"- Оценка: {sub.grade}/100")
+        context_lines.append(f"- Комментарий: {sub.feedback or '—'}")
+        if sub.review:
+            context_lines.append(f"- Рецензия: {sub.review[:500].strip()}")
+        context_lines.append("")
+
+    prompt = (
+        "Ты — ассистент преподавателя. У тебя есть данные о последних проверенных работах.\n\n"
+        + "\n".join(context_lines)
+        + f"\nВопрос преподавателя: {question}\n\n"
+        "Ответь подробно, опираясь только на данные выше. "
+        "Если данных недостаточно — так и скажи."
+    )
+
+    await status_msg.edit_text("🤔 Думаю...")
+    try:
+        answer, usage = await call_deepseek(prompt, expect_json=False, max_tokens=2000)
+        if usage:
+            record_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+
+        if answer:
+            await status_msg.edit_text(f"💬 <b>Ответ:</b>\n\n{answer[:3800]}")
+        else:
+            await status_msg.edit_text("⚠️ Не удалось получить ответ от агента.")
+    except Exception as e:
+        logger.warning("Ask command failed: %s", e)
+        await status_msg.edit_text("⚠️ Ошибка при обращении к агенту.")
