@@ -4,9 +4,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from core.config import settings
+
 logger = logging.getLogger(__name__)
 
-COST_FILE = "cost_stats.json"
+COST_FILE = str(Path(settings.storage_path) / "cost_stats.json")
 PRICE_PER_1M = 0.30
 
 
