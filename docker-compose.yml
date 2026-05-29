@@ -1,6 +1,7 @@
 services:
   bot:
     build: .
+    network_mode: "host"
     env_file: .env
     volumes:
       - ./files:/app/files
