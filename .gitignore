@@ -1,5 +1,52 @@
-.env
+# Python
 __pycache__/
-*.pyc
-*.db
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+*.so
+.Python
+.ipynb_checkpoints/
+
+# Env
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+virtualenv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project
 files/
+*.db
+*.sqlite
+*.sqlite3
+
+# Distribution
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Logs
+*.log
+
+# Docker
+.dockerignore
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
