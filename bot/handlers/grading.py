@@ -11,7 +11,10 @@ from core.config import settings
 from core.database import get_session
 from core.models import Submission, Lab, Course, Student
 from services.agent import AssessmentAgent
-from services.review import generate_review, organize_files, slugify, write_review
+from services.review import (
+    generate_review, global_prompt_path, course_prompt_path,
+    load_prompt, organize_files, save_prompt, slugify, write_review,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,9 @@ async def cmd_review(message: Message):
         course_title = course.title if course else "?"
         lab_title = lab.title if lab else "?"
         student_name = student.full_name if student else "?"
+        course_slug = slugify(course_title) if course else None
 
-        suggested = await agent.suggest(sub.extracted_text)
+        suggested = await agent.suggest(sub.extracted_text, course_slug=course_slug)
 
         kb = InlineKeyboardBuilder()
         kb.button(text="✏️ Поставить оценку", callback_data=f"grade_{sub.id}")
@@ -190,3 +194,66 @@ async def handle_grade_input(message: Message):
             await session.commit()
     except Exception as e:
         logger.warning("Failed to write REVIEW.md: %s", e)
+
+
+@router.message(F.chat.id == settings.group_id, Command("show_prompts"))
+async def cmd_show_prompts(message: Message):
+    lines = []
+    gp = load_prompt(global_prompt_path())
+    lines.append("🌐 <b>Глобальный промпт:</b>")
+    lines.append(f"<code>{gp[:300] if gp else '— не задан'}</code>")
+
+    async with await get_session() as session:
+        result = await session.execute(select(Course))
+        courses = result.scalars().all()
+        for c in courses:
+            cs = slugify(c.title)
+            cp = load_prompt(course_prompt_path(cs))
+            if cp:
+                lines.append(f"\n📚 <b>{c.title}:</b>")
+                lines.append(f"<code>{cp[:300]}</code>")
+
+    await message.answer("\n".join(lines))
+
+
+@router.message(F.chat.id == settings.group_id, Command("set_global_prompt"))
+async def cmd_set_global_prompt(message: Message):
+    if not message.reply_to_message or not message.reply_to_message.text:
+        await message.answer("Ответьте (quote) на сообщение с текстом промпта.")
+        return
+    text = message.reply_to_message.text.strip()
+    save_prompt(global_prompt_path(), text)
+    await message.answer(f"✅ Глобальный промпт сохранён ({len(text)} символов).")
+
+
+@router.message(F.chat.id == settings.group_id, Command("set_course_prompt"))
+async def cmd_set_course_prompt(message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2 or not message.reply_to_message or not message.reply_to_message.text:
+        await message.answer(
+            "Формат: <code>/set_course_prompt Название курса</code>\n"
+            "и ответьте (quote) на сообщение с текстом промпта."
+        )
+        return
+
+    course_title = parts[1].strip()
+    course_slug = slugify(course_title)
+    text = message.reply_to_message.text.strip()
+    save_prompt(course_prompt_path(course_slug), text)
+    await message.answer(f"✅ Промпт для курса «{course_title}» сохранён ({len(text)} символов).")
+
+
+@router.message(F.chat.id == settings.group_id, Command("get_course_prompt"))
+async def cmd_get_course_prompt(message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Формат: <code>/get_course_prompt Название курса</code>")
+        return
+
+    course_title = parts[1].strip()
+    course_slug = slugify(course_title)
+    cp = load_prompt(course_prompt_path(course_slug))
+    if cp:
+        await message.answer(f"📚 <b>{course_title}</b>\n<code>{cp[:1000]}</code>")
+    else:
+        await message.answer(f"Промпт для курса «{course_title}» не задан.")

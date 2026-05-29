@@ -87,6 +87,30 @@ def write_review(dest_dir: str, content: str):
     path.write_text(content, encoding="utf-8")
 
 
+GLOBAL_PROMPT_NAME = "PROMPT.md"
+
+
+def load_prompt(file_path: str) -> str | None:
+    path = Path(file_path)
+    if path.exists() and path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return None
+
+
+def save_prompt(file_path: str, content: str):
+    path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content.strip() + "\n", encoding="utf-8")
+
+
+def global_prompt_path() -> str:
+    return str(Path(settings.storage_path) / GLOBAL_PROMPT_NAME)
+
+
+def course_prompt_path(course_slug: str) -> str:
+    return str(Path(settings.storage_path) / course_slug / GLOBAL_PROMPT_NAME)
+
+
 def _fmt_size(size: int) -> str:
     if size < 1024:
         return f"{size} B"
